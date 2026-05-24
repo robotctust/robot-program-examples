@@ -12,7 +12,7 @@ Arduino robot example programs for Robotics Club curriculum.
 | --------------------------------------------------------- | --------------------------------------------------------------------- |
 | [`line-follower-basic`](./line-follower-basic/)           | Basic line following                                                  |
 | [`line-follower-advanced`](./line-follower-advanced/)     | Advanced line following with path map array and intersection handling |
-| [`bluetooth-remote-control`](./bluetooth-remote-control/) | Bluetooth remote control via HC-05/HC-06                              |
+| [`bluetooth-remote-control`](./bluetooth-remote-control/) | Bluetooth remote control.                                             |
 
 ---
 
