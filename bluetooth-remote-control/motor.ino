@@ -47,13 +47,13 @@ void Backward(int level) {
 }
 
 void SpinLeft(int level) {
-  MotorLeft(true, level);
-  MotorRight(false, level);
+  MotorLeft(false, level);   // 左輪後退
+  MotorRight(true, level);   // 右輪前進
 }
 
 void SpinRight(int level) {
-  MotorLeft(false, level);
-  MotorRight(true, level);
+  MotorLeft(true, level);    // 左輪前進
+  MotorRight(false, level);  // 右輪後退
 }
 
 void Stop() {
