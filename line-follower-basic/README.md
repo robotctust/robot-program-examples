@@ -1,40 +1,38 @@
 # line-follower-basic
 
-> 繁體中文版請見 [README.zh-TW.md](./README.zh-TW.md)
-
-Basic line following using three sensors (Left, Mid, Right). The robot steers based on which sensor detects the line. The two outer sensor pins are declared and reserved for future expansion.
+以左、中、右三顆感測器實作基礎循線邏輯。機器人根據感測到黑線的位置決定前進、左轉或右轉。最左與最右感測器的腳位已宣告保留，供後續擴充。
 
 ---
 
-## How It Works
+## 運作邏輯
 
-The robot reads the three center sensors every loop:
+每個迴圈讀取三顆中央感測器的狀態：
 
-| Mid | Left | Right | Action |
+| 中 | 左 | 右 | 動作 |
 |---|---|---|---|
-| ✅ | — | — | Forward |
-| ❌ | ✅ | — | Spin left |
-| ❌ | ❌ | ✅ | Spin right |
-| ❌ | ❌ | ❌ | Stop |
+| ✅ | — | — | 前進 |
+| ❌ | ✅ | — | 左轉 |
+| ❌ | ❌ | ✅ | 右轉 |
+| ❌ | ❌ | ❌ | 停止 |
 
-The outer sensors (`FAR_LEFT`, `FAR_RIGHT`) are also read and will trigger a spin if the inner ones miss the line entirely.
+最外側的兩顆感測器（`FAR_LEFT`、`FAR_RIGHT`）也會讀取，若內側三顆都沒偵測到線時作為補救轉向。
 
 ---
 
-## Adjustable Parameters
+## 可調整參數
 
 ```cpp
-const int SPEED_FORWARD = 100;   // Forward speed (0–255)
-const int SPEED_TURN    = 100;   // Turn speed (0–255)
-const int RIGHT_MOTOR_PCT = 100; // Right motor balance (%)
-const int LEFT_MOTOR_PCT  = 100; // Left motor balance (%)
+const int SPEED_FORWARD = 100;   // 直行速度（0–255）
+const int SPEED_TURN    = 100;   // 轉向速度（0–255）
+const int RIGHT_MOTOR_PCT = 100; // 右馬達校正（%）
+const int LEFT_MOTOR_PCT  = 100; // 左馬達校正（%）
 ```
 
-Adjust `RIGHT_MOTOR_PCT` / `LEFT_MOTOR_PCT` if the robot drifts to one side on a straight line.
+若機器人在直線段固定偏向一側，調整 `RIGHT_MOTOR_PCT` / `LEFT_MOTOR_PCT` 來補償。
 
 ---
 
-## Notes
+## 注意事項
 
-- IR sensor logic (`0`/`1` for line detection) may vary by manufacturer. Verify with `Serial.println()` before running.
-- This example uses `digitalRead()`. If your sensors support analog output, switching to `analogRead()` with a threshold can improve tolerance on worn or faded tracks.
+- IR 感測器的黑線邏輯（`0`/`1`）可能因廠牌不同而相反，上機前請先用 `Serial.println()` 確認，若數值相反，將程式中所有判斷條件的 `0` 和 `1` 互換即可。
+- 此範例使用 `digitalRead()`。若感測器支援類比輸出，改用 `analogRead()` 搭配閾值判斷可以提升在磨損或褪色賽道上的容錯率。

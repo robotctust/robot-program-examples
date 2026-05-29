@@ -1,34 +1,32 @@
 # robot-program-examples
 
-Arduino robot example programs for Robotics Club curriculum.
-
-> 繁體中文版請見 [README.zh-TW.md](./README.zh-TW.md)
+為機器人研究社課程設計的 Arduino 機器人範例程式集。
 
 ---
 
-## Examples
+## 範例總覽
 
-| Folder                                                    | Description                                                           |
-| --------------------------------------------------------- | --------------------------------------------------------------------- |
-| [`line-follower-basic`](./line-follower-basic/)           | Basic line following                                                  |
-| [`line-follower-advanced`](./line-follower-advanced/)     | Advanced line following with path map array and intersection handling |
-| [`bluetooth-remote-control`](./bluetooth-remote-control/) | Bluetooth remote control.                                             |
-
----
-
-## Hardware Requirements
-
-- **Arduino Uno** (or compatible board)
-- **IR sensors × 5** (bottom-mounted, for line detection)
-- **L9110S motor driver module**
-- **DC motors × 2**
-- **Bluetooth module** (only for `bluetooth-remote-control`)
-- **18650 battery × 2 + dual-cell battery holder** (or other suitable power source)
+| 資料夾                                                     | 功能                            |
+| --------------------------------------------------------- | ------------------------------- |
+| [`line-follower-basic`](./line-follower-basic/)           | 基礎循線（直線或曲線）              |
+| [`line-follower-advanced`](./line-follower-advanced/)     | 進階循線（地圖陣列 + 路口判斷）     | 
+| [`bluetooth-remote-control`](./bluetooth-remote-control/) | 藍牙遙控                         |
 
 ---
 
-## Getting Started
+## 硬體需求
 
-1. Open the `.ino` file inside the target folder with Arduino IDE.
-2. Tune the speed and motor balance constants to match your hardware.
-3. Select the correct board and port, then upload.
+- **Arduino Uno**（或相容板）
+- **IR 紅外線感測器 × 5**（底部循線用）
+- **L9110S 馬達驅動模組**
+- **直流馬達 × 2**
+- **藍牙模組**（僅 `bluetooth-remote-control` 需要）
+- **18650 電池 × 2 + 雙槽電池盒** （或其他電池合適電源）
+
+---
+
+## 使用方式
+
+1. 用 Arduino IDE 開啟對應資料夾內的 `.ino` 檔案。
+2. 依據你的車體調整速度與馬達校正參數。
+3. 選擇正確的板子與序列埠，上傳程式。

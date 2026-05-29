@@ -1,43 +1,41 @@
 # bluetooth-remote-control
 
-> 繁體中文版請見 [README.zh-TW.md](./README.zh-TW.md)
-
-Controls a two-wheeled robot via Bluetooth commands sent from a smartphone. The robot receives single-character commands over a serial Bluetooth connection and drives the motors accordingly.
+透過手機以藍牙傳送指令來控制兩輪機器人。機器人透過藍牙模組接收單字元指令，並驅動馬達執行對應動作。
 
 ---
 
-## Files
+## 檔案說明
 
-| File | Description |
+| 檔案 | 說明 |
 |---|---|
-| `bluetooth-remote-control.ino` | Main sketch — Bluetooth receive loop and command dispatch |
-| `motor.ino` | Motor driver abstraction — low-level PWM control and high-level movement functions |
+| `bluetooth-remote-control.ino` | 主程式 — 藍牙接收迴圈與指令分派 |
+| `motor.ino` | 馬達控制抽象層 — 底層 PWM 控制與高層動作函式 |
 
 ---
 
-## Command Mapping
+## 指令對應
 
-| Character | Action |
+| 字元 | 動作 |
 |---|---|
-| `a` | Forward |
-| `d` | Backward |
-| `c` | Spin left |
-| `b` | Spin right |
-| `s` | Stop |
-| _(any other)_ | Stop |
+| `a` | 前進 |
+| `d` | 後退 |
+| `c` | 左轉 |
+| `b` | 右轉 |
+| `s` | 停止 |
+| _（其他任何字元）_ | 停止 |
 
 ---
 
-## Recommended App
+## 推薦手機 App
 
-Use the Android app developed by our club with App Inventor 2, designed specifically for this robot:
+使用本社自行以 App Inventor 2 開發的 Android 遙控 App，專為此機器人設計：
 
-**[robot-bt-remote-app](https://github.com/robotctust/robot-bt-remote-app)** — download the APK from the [Releases](https://github.com/robotctust/robot-bt-remote-app/releases) page.
+**[robot-bt-remote-app](https://github.com/robotctust/robot-bt-remote-app)** — 至 [Releases](https://github.com/robotctust/robot-bt-remote-app/releases) 頁面下載 APK 安裝檔。
 
 ---
 
-## Adjustable Parameters
+## 可調整參數
 
 ```cpp
-int speed = 100; // Motor speed (0–255)
+int speed = 100; // 馬達速度（0–255）
 ```

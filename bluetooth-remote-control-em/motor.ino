@@ -49,11 +49,11 @@ static double m_prevEL  = 0, m_prevER  = 0;
 static bool   m_fwdL    = true, m_fwdR  = true;
 static unsigned long m_lastTick = 0;
 
-// ===== 中斷服務常式 =====
+// 中斷服務常式
 static void m_isrL() { if (digitalRead(M_ENCB_L) == HIGH) m_pulseL++; else m_pulseL--; }
 static void m_isrR() { if (digitalRead(M_ENCB_R) == LOW)  m_pulseR++; else m_pulseR--; }
 
-// ===== 內部：單輪 PID → PWM =====
+// 內部：單輪 PID → PWM 
 static int m_calcPWM(double tgt, double meas, double &intg, double &prevErr) {
   const double dt = SAMPLE_MS / 1000.0;
   double err   = tgt - meas;
@@ -65,7 +65,7 @@ static int m_calcPWM(double tgt, double meas, double &intg, double &prevErr) {
              + KI_MOTOR * trial
              + KD_MOTOR * deriv;
 
-  if (out >= 0.0 && out <= 255.0) intg = trial;   // 抗飽和
+  if (out >= 0.0 && out <= 255.0) intg = trial; 
   prevErr = err;
   return (int)constrain(out, 0, 255);
 }
