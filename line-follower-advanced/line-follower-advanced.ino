@@ -19,9 +19,9 @@ const int ML_B = 10;
 const int SENSOR_BLACK = HIGH;   // 感測到黑線時的電位（顛倒則改 LOW）
 
 // ===== 速度參數 =====
-const int SPEED_FORWARD = 110;   // 直走速度
+const int SPEED_FORWARD = 80;   // 直走速度
 const int SPEED_CORRECT =  80;   // 極偏時的旋轉速度
-const int SPEED_TURN    = 100;   // 路口轉彎速度
+const int SPEED_TURN    = 90;   // 路口轉彎速度
 const int SPEED_GENTLE  =  55;   // 七階循線：輕微修正的慢側速度
 const int SPEED_STRONG  =  25;   // 七階循線：強力修正的慢側速度（反轉）
 
@@ -39,6 +39,12 @@ const unsigned long TURN_135_MS = 450;
 // ===== 路口冷卻 =====
 //   觸發路口後此時間內不再觸發，避免連續誤判。
 const unsigned long JUNC_CD_MS = 500;
+
+// ===== 路口感測閂鎖 =====
+//   車身斜著進路口時，MID / RIGHT / FAR_RIGHT 不會在同一瞬間全亮。
+//   此時間內亮過的感測器都算「有看到」，用於 T 字路口判斷。
+//   仍漏判就加大；直線修正時誤觸發就減小。
+const unsigned long EDGE_LATCH_MS = 60;
 
 // ===== 虛線空白容忍 =====
 //   連續多少個 loop 沒有任何感測器亮起，才從「沿用上次修正」改為「直走」。
@@ -129,10 +135,11 @@ enum DriveMode {
 static DriveMode lastMode = MODE_FORWARD;
 
 // === 感測器模式比對 ==================================================================
-static bool patternMatches(uint8_t expected, bool bL, bool bML, bool bM, bool bMR, bool bR) {
+// recent = EDGE_LATCH_MS 內亮過的感測器位元（T 字路口用，避免斜進時三顆沒同時亮）
+static bool patternMatches(uint8_t expected, bool bL, bool bML, bool bM, bool bMR, bool bR, uint8_t recent) {
   switch (expected) {
-    case PAT_LEFT3:  return  bL && bML && bM && !bR;
-    case PAT_RIGHT3: return !bL && bM  && bMR && bR;
+    case PAT_LEFT3:  return (recent & PAT_LEFT3)  == PAT_LEFT3  && bM && !bR;
+    case PAT_RIGHT3: return (recent & PAT_RIGHT3) == PAT_RIGHT3 && bM && !bL;
     case PAT_ML_M:   return !bL && (bML || bM) && !bR;
     case PAT_L_M:    return  bL && (bML || bM) && !bMR && !bR;
     case PAT_DOT_R:  return  bM && bR;
@@ -195,13 +202,37 @@ void loop() {
 
   unsigned long now = millis();
 
+  // 更新感測器閂鎖
+  static unsigned long seenT[5];
+  const bool cur[5] = { bL, bML, bM, bMR, bR };
+  uint8_t recent = 0;
+  for (int i = 0; i < 5; i++) {
+    if (cur[i]) seenT[i] = now;
+    if (now - seenT[i] < EDGE_LATCH_MS) recent |= (1 << i);
+  }
+
+  // 除錯：感測器狀態有變化才印（左→右：FAR_LEFT LEFT MID RIGHT FAR_RIGHT，1 = 黑）
+  // ponytail: 除錯用，調好後改 false，否則序列埠輸出會拖慢 loop
+  const bool DEBUG_SENSORS = true;
+  static uint8_t lastBits = 0xFF;
+  uint8_t bits = 0;
+  for (int i = 0; i < 5; i++) if (cur[i]) bits |= (1 << i);
+  if (DEBUG_SENSORS && bits != lastBits) {
+    lastBits = bits;
+    Serial.print(now);
+    Serial.print("  ");
+    for (int i = 0; i < 5; i++) Serial.print(cur[i] ? '1' : '0');
+    Serial.print("  等待#");
+    Serial.println(juncIdx + 1);
+  }
+
   // 路口偵測（地圖驅動，支援預觸發 + 冷卻）
   if (juncIdx < N_MAP && (now - lastJuncT > JUNC_CD_MS)) {
     const MapStep step = MAP[juncIdx];
 
     if (step.prePattern != 0 && !juncPreSeen) {
       // 第一段：等待預觸發模式
-      if (patternMatches(step.prePattern, bL, bML, bM, bMR, bR)) {
+      if (patternMatches(step.prePattern, bL, bML, bM, bMR, bR, recent)) {
         juncPreSeen = true;
         Serial.print(">>> 路口 #");
         Serial.print(juncIdx + 1);
@@ -209,7 +240,7 @@ void loop() {
       }
     } else {
       // 第二段：預觸發已滿足（或不需要），等待主觸發模式
-      if (patternMatches(step.pattern, bL, bML, bM, bMR, bR)) {
+      if (patternMatches(step.pattern, bL, bML, bM, bMR, bR, recent)) {
         Serial.print(">>> 路口 #");
         Serial.print(juncIdx + 1);
         Serial.print(" / ");
@@ -320,14 +351,14 @@ void applyDriveMode(DriveMode mode) {
 // === 底層馬達控制 ==================================================================
 void MotorRight(bool forward, int level) {
   int adj = (int)((long)level * RIGHT_MOTOR_PCT / 100);
-  analogWrite(MR_A, forward ? adj : 0);
-  analogWrite(MR_B, !forward ? adj : 0);
+  analogWrite(MR_A, !forward ? adj : 0);
+  analogWrite(MR_B, forward ? adj : 0);
 }
 
 void MotorLeft(bool forward, int level) {
   int adj = (int)((long)level * LEFT_MOTOR_PCT / 100);
-  analogWrite(ML_B, forward ? adj : 0);
-  analogWrite(ML_A, !forward ? adj : 0);
+  analogWrite(ML_B, !forward ? adj : 0);
+  analogWrite(ML_A, forward ? adj : 0);
 }
 
 // === 高層動作函式 ==================================================================
