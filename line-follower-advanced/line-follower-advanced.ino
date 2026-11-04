@@ -10,10 +10,10 @@ const int S_RIGHT     = 7;
 const int S_FAR_RIGHT = 11;
 
 // ===== 馬達腳位 =====
-const int MR_A = 5;
-const int MR_B = 6;
-const int ML_A = 9;
-const int ML_B = 10;
+const int ML_A = 5;   // 左輪
+const int ML_B = 6;
+const int MR_A = 9;   // 右輪
+const int MR_B = 10;
 
 // ===== 感測器邏輯 =====
 const int SENSOR_BLACK = HIGH;   // 感測到黑線時的電位（顛倒則改 LOW）
@@ -28,6 +28,10 @@ const int SPEED_STRONG  =  25;   // 七階循線：強力修正的慢側速度�
 // ===== 馬達平衡校正（請根據你的車體自行微調）=====
 const int RIGHT_MOTOR_PCT = 100;
 const int LEFT_MOTOR_PCT  = 100;
+
+// ===== 馬達方向校正：輪子轉向與指令相反時，把對應的值改成 true/false =====
+const bool LEFT_MOTOR_INVERT  = true;
+const bool RIGHT_MOTOR_INVERT = false;
 
 // ===== 路口轉彎時間（ms）=====
 //   盲轉期間使用固定時間旋轉，之後靠感測器尋線完成。
@@ -350,15 +354,17 @@ void applyDriveMode(DriveMode mode) {
 
 // === 底層馬達控制 ==================================================================
 void MotorRight(bool forward, int level) {
+  if (RIGHT_MOTOR_INVERT) forward = !forward;
   int adj = (int)((long)level * RIGHT_MOTOR_PCT / 100);
-  analogWrite(MR_A, !forward ? adj : 0);
-  analogWrite(MR_B, forward ? adj : 0);
+  analogWrite(MR_A, forward ? adj : 0);
+  analogWrite(MR_B, forward ? 0 : adj);
 }
 
 void MotorLeft(bool forward, int level) {
+  if (LEFT_MOTOR_INVERT) forward = !forward;
   int adj = (int)((long)level * LEFT_MOTOR_PCT / 100);
-  analogWrite(ML_B, !forward ? adj : 0);
   analogWrite(ML_A, forward ? adj : 0);
+  analogWrite(ML_B, forward ? 0 : adj);
 }
 
 // === 高層動作函式 ==================================================================

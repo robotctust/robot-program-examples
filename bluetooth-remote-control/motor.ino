@@ -8,6 +8,10 @@ int B_1B = 10; // 右輪 IN2
 const int LEFT_MOTOR_PCT = 100;
 const int RIGHT_MOTOR_PCT = 100;
 
+// 馬達方向校正：輪子轉向與指令相反時，把對應的值改成 true/false
+const bool LEFT_MOTOR_INVERT = true;
+const bool RIGHT_MOTOR_INVERT = false;
+
 void motorSetup()
 {
   // 先清除輸出 latch，再切換方向，避免上電瞬間誤動作
@@ -25,16 +29,18 @@ void motorSetup()
 
 void MotorRight(bool fwd, int level)
 {
+  if (RIGHT_MOTOR_INVERT) fwd = !fwd;
   int adj = (int)((long)level * RIGHT_MOTOR_PCT / 100);
-  analogWrite(B_1A, !fwd ? adj : 0);
-  analogWrite(B_1B, fwd ? adj : 0);
+  analogWrite(B_1A, fwd ? adj : 0);
+  analogWrite(B_1B, fwd ? 0 : adj);
 }
 
 void MotorLeft(bool fwd, int level)
 {
+  if (LEFT_MOTOR_INVERT) fwd = !fwd;
   int adj = (int)((long)level * LEFT_MOTOR_PCT / 100);
-  analogWrite(A_1B, !fwd ? adj : 0);
   analogWrite(A_1A, fwd ? adj : 0);
+  analogWrite(A_1B, fwd ? 0 : adj);
 }
 
 // ── 高層動作函式（移植自 robot_basic_followline）──

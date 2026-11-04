@@ -10,10 +10,10 @@ const int S_RIGHT     = 7;
 const int S_FAR_RIGHT = 11;  // 最右（保留）
 
 // 馬達腳位
-int MR_A = 5;
-int MR_B = 6;
-int ML_A = 9;
-int ML_B = 10;
+int ML_A = 5;   // 左輪
+int ML_B = 6;
+int MR_A = 9;   // 右輪
+int MR_B = 10;
 
 // 速度參數
 const int SPEED_FORWARD = 100;
@@ -22,6 +22,10 @@ const int SPEED_TURN    = 100;
 // 馬達平衡校正
 const int RIGHT_MOTOR_PCT = 100;
 const int LEFT_MOTOR_PCT  = 100;
+
+// 馬達方向校正：輪子轉向與指令相反時，把對應的值改成 true/false
+const bool LEFT_MOTOR_INVERT  = true;
+const bool RIGHT_MOTOR_INVERT = false;
 
 void setup() {
   Serial.begin(115200);
@@ -74,15 +78,17 @@ void loop() {
 // ── 底層馬達控制 ──
 
 void MotorRight(bool forward, int level) {
+  if (RIGHT_MOTOR_INVERT) forward = !forward;
   int adj = (int)((long)level * RIGHT_MOTOR_PCT / 100);
   analogWrite(MR_A, forward ? adj : 0);
-  analogWrite(MR_B, !forward ? adj : 0);
+  analogWrite(MR_B, forward ? 0 : adj);
 }
 
 void MotorLeft(bool forward, int level) {
+  if (LEFT_MOTOR_INVERT) forward = !forward;
   int adj = (int)((long)level * LEFT_MOTOR_PCT / 100);
-  analogWrite(ML_B, forward ? adj : 0);
-  analogWrite(ML_A, !forward ? adj : 0);
+  analogWrite(ML_A, forward ? adj : 0);
+  analogWrite(ML_B, forward ? 0 : adj);
 }
 
 // ── 高層動作函式 ─-
