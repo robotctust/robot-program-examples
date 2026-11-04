@@ -1,0 +1,359 @@
+// ==========================================
+// 進階循線（Uno R4 編碼器車）：七階查表式循線 + 地圖驅動路口決策
+//   邏輯與 line-follower-advanced 相同，馬達改由 motor.ino（編碼器 PID 穩速）控制。
+//   注意：motorTick() 必須持續被呼叫，PID 才會運作，
+//   所以轉彎時不用 delay()，改用 waitMs()。
+// ==========================================
+
+// ===== 感測器腳位（最左 → 最右）=====
+const int S_FAR_LEFT  = A0;
+const int S_LEFT      = A1;
+const int S_MID       = A2;
+const int S_RIGHT     = A3;
+const int S_FAR_RIGHT = A4;
+
+// 馬達 / 編碼器腳位定義在 motor.ino
+
+// ===== 感測器邏輯 =====
+const int SENSOR_BLACK = HIGH;   // 感測到黑線時的電位（顛倒則改 LOW）
+
+// ===== 速度參數（單位：RPM，此馬達最高約 50 RPM）=====
+//   左右輪由 PID 穩速，不需要馬達平衡校正。
+const double SPEED_FORWARD = 30;   // 直走速度
+const double SPEED_CORRECT = 30;   // 極偏時的旋轉速度
+const double SPEED_TURN    = 30;   // 路口轉彎速度
+const double SPEED_GENTLE  = 20;   // 七階循線：輕微修正的慢側速度
+const double SPEED_STRONG  = 10;   // 七階循線：強力修正的慢側速度（反轉）
+
+// ===== 路口前推時間（ms）=====
+//   感測器在車頭前方，轉彎前先往前推，讓旋轉軸心對齊路口。
+const unsigned long FORWARD_PUSH_MS = 200;
+
+// ===== 路口轉彎時間（ms）=====
+//   盲轉期間使用固定時間旋轉，之後靠感測器尋線完成。
+//   實機如果發現轉不準，先量 90° 再線性外推 45° / 135°。
+const unsigned long TURN_45_MS  = 125;
+const unsigned long TURN_90_MS  = 275;
+const unsigned long TURN_135_MS = 450;
+
+// ===== 路口冷卻 =====
+//   觸發路口後此時間內不再觸發，避免連續誤判。
+const unsigned long JUNC_CD_MS = 500;
+
+// ===== 路口感測閂鎖 =====
+//   車身斜著進路口時，MID / RIGHT / FAR_RIGHT 不會在同一瞬間全亮。
+//   此時間內亮過的感測器都算「有看到」，用於 T 字路口判斷。
+//   仍漏判就加大；直線修正時誤觸發就減小。
+const unsigned long EDGE_LATCH_MS = 60;
+
+// ===== 虛線空白容忍 =====
+//   連續多少個 loop 沒有任何感測器亮起，才從「沿用上次修正」改為「直走」。
+//   數值太小：輕微顛簸就切成直走，失去方向記憶。
+//   數值太大：激進修正會通過整段空隙，造成偏移。
+const int DASH_GAP_CYCLES = 20;
+
+// === 感測器模式（位元化）==================================================================
+// bit0 = FAR_LEFT   bit1 = LEFT   bit2 = MID   bit3 = RIGHT   bit4 = FAR_RIGHT
+#define P_L   (1 << 0)
+#define P_ML  (1 << 1)
+#define P_M   (1 << 2)
+#define P_MR  (1 << 3)
+#define P_R   (1 << 4)
+
+// 感測器模式
+#define PAT_LEFT3   (P_L  | P_ML | P_M)               // [FAR_LEFT, LEFT, MID]          左 T 字
+#define PAT_RIGHT3  (P_M  | P_MR | P_R)               // [MID, RIGHT, FAR_RIGHT]        右 T 字
+#define PAT_ML_M    (P_ML | P_M)                      // [LEFT, MID]                    窄角左路主觸發
+#define PAT_L_M     (P_L  | P_M)                      // [FAR_LEFT, MID]                窄角左路預觸發
+#define PAT_DOT_R   (P_M  | P_R)                      // [MID, FAR_RIGHT]               虛線右路
+#define PAT_R_M     (P_MR | P_R)                      // [RIGHT, FAR_RIGHT]             窄角右路預觸發
+#define PAT_CTR     (P_ML | P_M | P_MR)               // 中央區（M亮且兩側外感測器未亮）
+#define PAT_ALL     (P_L  | P_ML | P_M | P_MR | P_R)  // [全部]                         十字 / 終點
+
+// === 動作列舉與地圖結構 ==================================================================
+enum Action {
+  ACT_LEFT_45,
+  ACT_RIGHT_45,
+  ACT_LEFT_90,
+  ACT_RIGHT_90,
+  ACT_LEFT_135,
+  ACT_RIGHT_135,
+  ACT_END,
+};
+
+struct MapStep {
+  uint8_t prePattern;  // 預觸發模式（0 = 無需預觸發，直接偵測 pattern）
+  uint8_t pattern;     // 主觸發模式
+  Action  action; 
+};
+
+// === 地圖定義 ==================================================================
+// 此版本根據 AERC A 圖所寫
+const MapStep MAP[] = {
+//  prePattern  pattern      action
+  { 0,          PAT_RIGHT3,  ACT_RIGHT_90  },   //  1. 右轉 90°
+  { 0,          PAT_RIGHT3,  ACT_RIGHT_90  },   //  2. 右轉 90°
+  { 0,          PAT_LEFT3,   ACT_LEFT_90   },   //  3. 左轉 90°
+  { 0,          PAT_LEFT3,   ACT_LEFT_90   },   //  4. 左轉 90°
+  { 0,          PAT_RIGHT3,  ACT_RIGHT_90  },   //  5. 右轉 90°
+  { 0,          PAT_RIGHT3,  ACT_RIGHT_90  },   //  6. 右轉 90°
+  { PAT_L_M,    PAT_ML_M,    ACT_LEFT_135  },   //  7. 左轉 135°（先見 [FAR_LEFT,MID]，再見 [LEFT,MID] 才觸發）
+  { PAT_R_M,    PAT_CTR,     ACT_LEFT_45   },   //  8. 左轉 45°（先見 [RIGHT,FAR_RIGHT]，再見中央態才觸發）
+  { 0,          PAT_RIGHT3,  ACT_RIGHT_90  },   //  9. 右轉 90°
+  { 0,          PAT_RIGHT3,  ACT_RIGHT_90  },   // 10. 右轉 90°
+  { 0,          PAT_DOT_R,   ACT_RIGHT_90  },   // 11. 虛線右路右轉 90°
+  { 0,          PAT_LEFT3,   ACT_LEFT_90   },   // 12. 左轉 90°
+  { 0,          PAT_LEFT3,   ACT_LEFT_90   },   // 13. 左轉 90°
+  { 0,          PAT_DOT_R,   ACT_RIGHT_90  },   // 14. 虛線右路右轉 90°
+  { 0,          PAT_RIGHT3,  ACT_RIGHT_90  },   // 15. 右轉 90°
+  { 0,          PAT_LEFT3,   ACT_LEFT_90   },   // 16. 左轉 90°
+  { 0,          PAT_LEFT3,   ACT_LEFT_90   },   // 17. 左轉 90°
+  { 0,          PAT_RIGHT3,  ACT_RIGHT_90  },   // 18. 右轉 90°
+  { 0,          PAT_ALL,     ACT_LEFT_90   },   // 19. 十字路口左轉 90°（五感全黑）
+  { 0,          PAT_ALL,     ACT_END       },   // 20. 終點停止
+};
+const int N_MAP = sizeof(MAP) / sizeof(MAP[0]);
+
+// === 內部狀態 ==================================================================
+bool          robot_done  = false;
+int           juncIdx     = 0;       // 目前等待觸發的路口（= MAP 索引）
+bool          juncPreSeen = false;   // 預觸發旗標
+unsigned long lastJuncT   = 0;       // 上次路口觸發時間（冷卻用）
+int           blankCount  = 0;       // 連續無感測器亮起的計數（虛線空白容忍用）
+
+// 七階循線
+enum DriveMode {
+  MODE_FORWARD,   // 置中直走
+  MODE_GENTLE_L,  // 輕微左修（輕右偏矯正）
+  MODE_GENTLE_R,  // 輕微右修（輕左偏矯正）
+  MODE_STRONG_L,  // 強力左修（強右偏矯正）
+  MODE_STRONG_R,  // 強力右修（強左偏矯正）
+  MODE_SPIN_L,    // 原地左旋（極右偏矯正）
+  MODE_SPIN_R,    // 原地右旋（極左偏矯正）
+};
+// 記憶上次驅動模式
+static DriveMode lastMode = MODE_FORWARD;
+
+// === 感測器模式比對 ==================================================================
+// recent = EDGE_LATCH_MS 內亮過的感測器位元（T 字路口用，避免斜進時三顆沒同時亮）
+static bool patternMatches(uint8_t expected, bool bL, bool bML, bool bM, bool bMR, bool bR, uint8_t recent) {
+  switch (expected) {
+    case PAT_LEFT3:  return (recent & PAT_LEFT3)  == PAT_LEFT3  && bM && !bR;
+    case PAT_RIGHT3: return (recent & PAT_RIGHT3) == PAT_RIGHT3 && bM && !bL;
+    case PAT_ML_M:   return !bL && (bML || bM) && !bR;
+    case PAT_L_M:    return  bL && (bML || bM) && !bMR && !bR;
+    case PAT_DOT_R:  return  bM && bR;
+    case PAT_R_M:    return  bR && (bMR || bM) && !bML && !bL;
+    case PAT_CTR:    return  bM && !bL && !bR;
+    case PAT_ALL:    return  bL && bML && bM && bMR && bR;
+    default:         return false;
+  }
+}
+
+// === 動作名稱（除錯訊息用）==================================================================
+static const char* actionName(Action a) {
+  switch (a) {
+    case ACT_LEFT_45:   return "L45";
+    case ACT_RIGHT_45:  return "R45";
+    case ACT_LEFT_90:   return "L90";
+    case ACT_RIGHT_90:  return "R90";
+    case ACT_LEFT_135:  return "L135";
+    case ACT_RIGHT_135: return "R135";
+    case ACT_END:       return "END";
+  }
+  return "?";
+}
+
+// === setup ==================================================================
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(S_FAR_LEFT,  INPUT);
+  pinMode(S_LEFT,      INPUT);
+  pinMode(S_MID,       INPUT);
+  pinMode(S_RIGHT,     INPUT);
+  pinMode(S_FAR_RIGHT, INPUT);
+
+  motorBegin();
+
+  Serial.print("=== 進階循線啟動，地圖共 ");
+  Serial.print(N_MAP);
+  Serial.println(" 個路口 ===");
+
+  waitMs(1000);
+}
+
+// === loop ==================================================================
+void loop() {
+  motorTick();    // 馬達 PID 內部自動節流
+
+  if (robot_done) {
+    Stop();
+    return;
+  }
+
+  // 讀感測器（true = 碰到黑線）
+  bool bL  = (digitalRead(S_FAR_LEFT)  == SENSOR_BLACK);
+  bool bML = (digitalRead(S_LEFT)      == SENSOR_BLACK);
+  bool bM  = (digitalRead(S_MID)       == SENSOR_BLACK);
+  bool bMR = (digitalRead(S_RIGHT)     == SENSOR_BLACK);
+  bool bR  = (digitalRead(S_FAR_RIGHT) == SENSOR_BLACK);
+
+  unsigned long now = millis();
+
+  // 更新感測器閂鎖
+  static unsigned long seenT[5];
+  const bool cur[5] = { bL, bML, bM, bMR, bR };
+  uint8_t recent = 0;
+  for (int i = 0; i < 5; i++) {
+    if (cur[i]) seenT[i] = now;
+    if (now - seenT[i] < EDGE_LATCH_MS) recent |= (1 << i);
+  }
+
+  // 除錯：感測器狀態有變化才印（左→右：FAR_LEFT LEFT MID RIGHT FAR_RIGHT，1 = 黑）
+  // ponytail: 除錯用，調好後改 false，否則序列埠輸出會拖慢 loop
+  const bool DEBUG_SENSORS = true;
+  static uint8_t lastBits = 0xFF;
+  uint8_t bits = 0;
+  for (int i = 0; i < 5; i++) if (cur[i]) bits |= (1 << i);
+  if (DEBUG_SENSORS && bits != lastBits) {
+    lastBits = bits;
+    Serial.print(now);
+    Serial.print("  ");
+    for (int i = 0; i < 5; i++) Serial.print(cur[i] ? '1' : '0');
+    Serial.print("  等待#");
+    Serial.println(juncIdx + 1);
+  }
+
+  // 路口偵測（地圖驅動，支援預觸發 + 冷卻）
+  if (juncIdx < N_MAP && (now - lastJuncT > JUNC_CD_MS)) {
+    const MapStep step = MAP[juncIdx];
+
+    if (step.prePattern != 0 && !juncPreSeen) {
+      // 第一段：等待預觸發模式
+      if (patternMatches(step.prePattern, bL, bML, bM, bMR, bR, recent)) {
+        juncPreSeen = true;
+        Serial.print(">>> 路口 #");
+        Serial.print(juncIdx + 1);
+        Serial.println(" 預觸發");
+      }
+    } else {
+      // 第二段：預觸發已滿足（或不需要），等待主觸發模式
+      if (patternMatches(step.pattern, bL, bML, bM, bMR, bR, recent)) {
+        Serial.print(">>> 路口 #");
+        Serial.print(juncIdx + 1);
+        Serial.print(" / ");
+        Serial.print(N_MAP);
+        Serial.print("  動作=");
+        Serial.println(actionName(step.action));
+        lastJuncT   = now;
+        juncPreSeen = false;
+        juncIdx++;
+        blankCount  = 0;
+        performAction(step.action);
+        return;
+      }
+    }
+  }
+
+  // 七階查表循線
+  bool anyBlack = bL || bML || bM || bMR || bR;
+  DriveMode mode;
+
+  if (!anyBlack) {
+    // 空白段：短空隙沿用上次修正，長空隙改直走
+    blankCount++;
+    mode = (blankCount > DASH_GAP_CYCLES) ? MODE_FORWARD : lastMode;
+  } else {
+    blankCount = 0;
+    if      (!bML &&  bM  && !bMR        )  mode = MODE_FORWARD;   // 置中
+    else if ( bML &&  bM  && !bMR        )  mode = MODE_GENTLE_L;  // 輕右偏
+    else if (!bML &&  bM  &&  bMR        )  mode = MODE_GENTLE_R;  // 輕左偏
+    else if ( bML && !bM  && !bMR        )  mode = MODE_STRONG_L;  // 強右偏
+    else if (!bML && !bM  &&  bMR        )  mode = MODE_STRONG_R;  // 強左偏
+    else if ( bL  && !bML && !bM && !bMR )  mode = MODE_SPIN_L;    // 極右偏
+    else if (!bML && !bM  && !bMR &&  bR )  mode = MODE_SPIN_R;    // 極左偏
+    else if ( bML &&  bM  &&  bMR        )  mode = MODE_FORWARD;   // 橫線：直行穿越
+    else                                     mode = lastMode;      // 未知態：沿用
+  }
+
+  lastMode = mode;
+  applyDriveMode(mode);
+}
+
+// === 等待工具 ==================================================================
+// 取代 delay()：等待期間持續呼叫 motorTick()，PID 才不會停擺。
+void waitMs(unsigned long ms) {
+  unsigned long t0 = millis();
+  while (millis() - t0 < ms) motorTick();
+}
+
+// 旋轉中等待中間感測器碰到黑線
+void waitMidBlack() {
+  while (digitalRead(S_MID) != SENSOR_BLACK) motorTick();
+}
+
+// === 路口轉彎動作實作 ==================================================================
+// 先盲轉固定時間（TURN_*_MS），再靠感測器尋回黑線。
+// 注意：因感測器在前方，需要先前推（FORWARD_PUSH_MS）讓旋轉軸心推到路口。
+// 這些時間皆須依據您的車子速度手動微調。
+void performAction(Action action) {
+  switch (action) {
+    case ACT_LEFT_90:
+      Forward(SPEED_FORWARD);  waitMs(FORWARD_PUSH_MS);
+      SpinLeft(SPEED_TURN);    waitMs(TURN_90_MS);
+      waitMidBlack();
+      break;
+
+    case ACT_LEFT_135:
+      Forward(SPEED_FORWARD);  waitMs(FORWARD_PUSH_MS);
+      SpinLeft(SPEED_TURN);    waitMs(TURN_135_MS);
+      waitMidBlack();
+      break;
+
+    case ACT_LEFT_45:
+      // 45° 不需前推，感測器觸發時已有角度偏移
+      SpinLeft(SPEED_TURN);    waitMs(TURN_45_MS);
+      waitMidBlack();
+      break;
+
+    case ACT_RIGHT_90:
+      Forward(SPEED_FORWARD);  waitMs(FORWARD_PUSH_MS);
+      SpinRight(SPEED_TURN);   waitMs(TURN_90_MS);
+      waitMidBlack();
+      break;
+
+    case ACT_RIGHT_135:
+      Forward(SPEED_FORWARD);  waitMs(FORWARD_PUSH_MS);
+      SpinRight(SPEED_TURN);   waitMs(TURN_135_MS);
+      waitMidBlack();
+      break;
+
+    case ACT_RIGHT_45:
+      SpinRight(SPEED_TURN);   waitMs(TURN_45_MS);
+      waitMidBlack();
+      break;
+
+    case ACT_END:
+      robot_done = true;
+      Stop();
+      Serial.println(">>> 抵達終點");
+      return;
+  }
+  Stop();
+  waitMs(100);
+}
+
+// === 七階循線驅動模式執行 ==================================================================
+// motorSetSpeed(左輪 RPM, 右輪 RPM)，負值為反轉；Forward / SpinLeft / SpinRight / Stop 定義在 motor.ino
+void applyDriveMode(DriveMode mode) {
+  switch (mode) {
+    case MODE_FORWARD:   Forward(SPEED_FORWARD);                        break;
+    case MODE_GENTLE_L:  motorSetSpeed( SPEED_GENTLE,  SPEED_FORWARD);  break;
+    case MODE_GENTLE_R:  motorSetSpeed( SPEED_FORWARD, SPEED_GENTLE);   break;
+    case MODE_STRONG_L:  motorSetSpeed(-SPEED_STRONG,  SPEED_FORWARD);  break;
+    case MODE_STRONG_R:  motorSetSpeed( SPEED_FORWARD, -SPEED_STRONG);  break;
+    case MODE_SPIN_L:    SpinLeft(SPEED_CORRECT);                       break;
+    case MODE_SPIN_R:    SpinRight(SPEED_CORRECT);                      break;
+  }
+}
