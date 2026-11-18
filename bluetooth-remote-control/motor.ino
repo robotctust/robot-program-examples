@@ -76,3 +76,22 @@ void Stop()
   digitalWrite(B_1A, LOW);
   digitalWrite(B_1B, LOW);
 }
+
+// ── 差速混控直接驅動（支援 iOS / Android 類比搖桿連續差速輸出）──
+void DriveDifferential(int leftSpeed, int rightSpeed)
+{
+  if (leftSpeed == 0 && rightSpeed == 0) {
+    Stop();
+    return;
+  }
+  if (leftSpeed >= 0) {
+    MotorLeft(true, constrain(leftSpeed, 0, 255));
+  } else {
+    MotorLeft(false, constrain(-leftSpeed, 0, 255));
+  }
+  if (rightSpeed >= 0) {
+    MotorRight(true, constrain(rightSpeed, 0, 255));
+  } else {
+    MotorRight(false, constrain(-rightSpeed, 0, 255));
+  }
+}
